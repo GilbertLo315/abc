@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>剪刀石頭布 - 攝像頭遊戲</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f8ff;
+        }
+        
+        h1 {
+            color: #2c3e50;
+        }
+        
+        .game-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        
+        .camera-container {
+            position: relative;
+            width: 400px;
+            height: 300px;
+            margin: 20px 0;
+            border: 3px solid #3498db;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+        
+        #webcam {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: rgba(0,0,0,0.5);
+            color: white;
+            font-size: 24px;
+        }
+        
+        .controls {
+            margin: 20px 0;
+        }
+        
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 0 10px;
+            transition: background-color 0.3s;
+        }
+        
+        button:hover {
+            background-color: #2980b9;
+        }
+        
+        button:disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+        }
+        
+        .result-container {
+            display: flex;
+            justify-content: space-around;
+            width: 100%;
+            margin: 20px 0;
+        }
+        
+        .result-box {
+            width: 45%;
+            padding: 15px;
+            border-radius: 5px;
+            background-color: #ecf0f1;
+        }
+        
+        .score-container {
+            margin-top: 20px;
+            font-size: 18px;
+        }
+        
+        #countdown {
+            font-size: 48px;
+            font-weight: bold;
+            color: #e74c3c;
+            margin: 10px 0;
+        }
+        
+        #prediction {
+            font-size: 24px;
+            margin: 10px 0;
+            min-height: 30px;
+        }
+        
+        .instructions {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #e8f4f8;
+            border-radius: 5px;
+            text-align: left;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <h1>剪刀石頭布 - 攝像頭遊戲</h1>
+        
+        <div class="instructions">
+            <h3>遊戲說明：</h3>
+            <ol>
+                <li>點擊"啟動攝像頭"按鈕允許使用您的攝像頭</li>
+                <li>準備好後，點擊"開始遊戲"按鈕</li>
+                <li>倒數結束後，展示您的手勢（剪刀、石頭或布）</li>
+                <li>計算機將識別您的手勢並做出回應</li>
+                <li>查看結果並繼續玩！</li>
+            </ol>
+        </div>
+        
+        <div class="camera-container">
+            <video id="webcam" autoplay playsinline></video>
+            <div class="overlay" id="overlay">攝像頭未啟動</div>
+        </div>
+        
+        <div id="prediction"></div>
+        <div id="countdown"></div>
+        
+        <div class="controls">
+            <button id="startButton">啟動攝像頭</button>
+            <button id="playButton" disabled>開始遊戲</button>
+        </div>
+        
+        <div class="result-container">
+            <div class="result-box">
+                <h3>你的選擇</h3>
+                <div id="userChoice">-</div>
+            </div>
+            <div class="result-box">
+                <h3>電腦選擇</h3>
+                <div id="computerChoice">-</div>
+            </div>
+        </div>
+        
+        <div id="resultText" style="font-size: 24px; margin: 20px 0;"></div>
+        
+        <div class="score-container">
+            <p>得分: <span id="userScore">0</span> - <span id="computerScore">0</span></p>
+        </div>
+    </div>
+
+    <!-- 引入Teachable Machine的模型 -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/speech-commands@0.4.0/dist/speech-commands.min.js"></script>
+    
+    <script>
+        // 遊戲變量
+        let model;
+        let webcam;
+        let isPlaying = false;
+        let countdownInterval;
+        let userScore = 0;
+        let computerScore = 0;
+        
+        // DOM元素
+        const startButton = document.getElementById('startButton');
+        const playButton = document.getElementById('playButton');
+        const webcamElement = document.getElementById('webcam');
+        const overlay = document.getElementById('overlay');
+        const countdownElement = document.getElementById('countdown');
+        const predictionElement = document.getElementById('prediction');
+        const userChoiceElement = document.getElementById('userChoice');
+        const computerChoiceElement = document.getElementById('computerChoice');
+        const resultTextElement = document.getElementById('resultText');
+        const userScoreElement = document.getElementById('userScore');
+        const computerScoreElement = document.getElementById('computerScore');
+        
+        // 啟動攝像頭
+        startButton.addEventListener('click', async () => {
+            try {
+                webcam = await tf.data.webcam(webcamElement);
+                overlay.style.display = 'none';
+                startButton.disabled = true;
+                playButton.disabled = false;
+                
+                // 加載模型
+                model = await tmImage.load('https://teachablemachine.withgoogle.com/models/你的模型ID/model.json', 'https://teachablemachine.withgoogle.com/models/你的模型ID/metadata.json');
+                
+                console.log('攝像頭和模型已準備好');
+            } catch (error) {
+                console.error('錯誤:', error);
+                overlay.textContent = '錯誤: ' + error.message;
+            }
+        });
+        
+        // 開始遊戲
+        playButton.addEventListener('click', () => {
+            if (isPlaying) return;
+            
+            isPlaying = true;
+            playButton.disabled = true;
+            countdownElement.textContent = '3';
+            
+            let count = 3;
+            countdownInterval = setInterval(() => {
+                count--;
+                countdownElement.textContent = count;
+                
+                if (count <= 0) {
+                    clearInterval(countdownInterval);
+                    countdownElement.textContent = '';
+                    playRound();
+                }
+            }, 1000);
+        });
+        
+        // 遊戲回合
+        async function playRound() {
+            // 拍照並預測
+            const image = await webcam.capture();
+            const prediction = await model.predict(image);
+            
+            // 釋放內存
+            tf.dispose(image);
+            
+            // 獲取最高概率的預測
+            let maxProbability = 0;
+            let userChoice = '';
+            
+            prediction.forEach(item => {
+                if (item.probability > maxProbability) {
+                    maxProbability = item.probability;
+                    userChoice = item.className;
+                }
+            });
+            
+            // 顯示用戶選擇
+            userChoiceElement.textContent = translateChoice(userChoice);
+            predictionElement.textContent = `你出了: ${translateChoice(userChoice)} (${Math.round(maxProbability * 100)}% 置信度)`;
+            
+            // 計算機隨機選擇
+            const choices = ['rock', 'paper', 'scissors'];
+            const computerChoice = choices[Math.floor(Math.random() * choices.length)];
+            computerChoiceElement.textContent = translateChoice(computerChoice);
+            
+            // 判斷勝負
+            const result = determineWinner(userChoice, computerChoice);
+            resultTextElement.textContent = result;
+            
+            // 更新分數
+            if (result.includes('贏')) {
+                userScore++;
+            } else if (result.includes('輸')) {
+                computerScore++;
+            }
+            
+            userScoreElement.textContent = userScore;
+            computerScoreElement.textContent = computerScore;
+            
+            // 重置遊戲狀態
+            setTimeout(() => {
+                isPlaying = false;
+                playButton.disabled = false;
+                predictionElement.textContent = '';
+                resultTextElement.textContent = '';
+            }, 3000);
+        }
+        
+        // 判斷勝負
+        function determineWinner(user, computer) {
+            if (user === computer) return '平手！';
+            
+            if ((user === 'rock' && computer === 'scissors') ||
+                (user === 'paper' && computer === 'rock') ||
+                (user === 'scissors' && computer === 'paper')) {
+                return '你贏了！';
+            }
+            
+            return '你輸了！';
+        }
+        
+        // 翻譯選擇
+        function translateChoice(choice) {
+            const translations = {
+                'rock': '石頭',
+                'paper': '布',
+                'scissors': '剪刀'
+            };
+            return translations[choice] || choice;
+        }
+    </script>
+</body>
+</html>
